@@ -1,0 +1,33 @@
+{
+  "44828251-b26d-40c7-a9bb-485fbbabf91f": {
+    "id": "44828251-b26d-40c7-a9bb-485fbbabf91f",
+    "title": "Plan a 7-day trip to Japan",
+    "created_at": "2026-08-20T10:02:12.579542+00:00",
+    "updated_at": "2026-08-20T10:02:12.622359+00:00",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Plan a 7-day trip to Japan",
+        "time": "2026-08-20T10:02:12.622337+00:00"
+      }
+    ]
+  },
+  "43de2cf7-93d6-4e9e-b57e-fb07b7083e7f": {
+    "id": "43de2cf7-93d6-4e9e-b57e-fb07b7083e7f",
+    "title": "namste",
+    "created_at": "2026-08-20T10:03:39.908151+00:00",
+    "updated_at": "2026-08-20T10:04:14.936654+00:00",
+    "messages": [
+      {
+        "role": "user",
+        "content": "namste",
+        "time": "2026-08-20T10:03:46.318525+00:00"
+      },
+      {
+        "role": "assistant",
+        "content": "Namaste! 😊 How can I assist you today?",
+        "time": "2026-08-20T10:04:14.936636+00:00"
+      }
+    ]
+  }
+}

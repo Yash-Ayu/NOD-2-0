@@ -1,0 +1,12 @@
+{"timestamp": "2026-08-20T07:03:03.280114+00:00", "user": "y26gpt@gmail.com", "action": "auth_signup", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T07:03:17.695010+00:00", "user": "y26gpt@gmail.com", "action": "chat_created", "details": {"chat_id": "88261483-cdd9-43f4-b9fb-de8037a9ced8"}, "severity": "info", "ip": "unknown"}
+{"timestamp": "2026-08-20T07:36:08.558173+00:00", "user": "test@test.com", "action": "auth_signup", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T07:36:08.939274+00:00", "user": "test@test.com", "action": "auth_login_success", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T07:36:08.945671+00:00", "user": "test@test.com", "action": "sudo_granted", "details": {"expires_in": "10min"}, "severity": "warning", "ip": "unknown"}
+{"timestamp": "2026-08-20T08:23:44.463156+00:00", "user": "y26gpt@gmail.com", "action": "auth_login_success", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T08:23:58.488517+00:00", "user": "y26gpt@gmail.com", "action": "chat_created", "details": {"chat_id": "026baafa-5263-4733-9ea2-4501bbd19374"}, "severity": "info", "ip": "unknown"}
+{"timestamp": "2026-08-20T09:55:02.488880+00:00", "user": "y26gpt@gmail.com", "action": "auth_login_success", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T09:55:28.474280+00:00", "user": "y26gpt@gmail.com", "action": "auth_logout", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T09:58:04.022170+00:00", "user": "inderdeep5402@gmail.com", "action": "auth_signup", "details": {"success": true}, "severity": "info", "ip": "127.0.0.1"}
+{"timestamp": "2026-08-20T10:02:12.580706+00:00", "user": "inderdeep5402@gmail.com", "action": "chat_created", "details": {"chat_id": "44828251-b26d-40c7-a9bb-485fbbabf91f"}, "severity": "info", "ip": "unknown"}
+{"timestamp": "2026-08-20T10:03:39.909324+00:00", "user": "inderdeep5402@gmail.com", "action": "chat_created", "details": {"chat_id": "43de2cf7-93d6-4e9e-b57e-fb07b7083e7f"}, "severity": "info", "ip": "unknown"}

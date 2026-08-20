@@ -1,0 +1,20 @@
+{
+  "y26gpt@gmail.com": {
+    "name": "Yash Sahota",
+    "password": "$2b$12$LzbODnUCOdVlC9.wv7jxSexkgdTjSPRkqbhrUfub7hWD3bMfIs992",
+    "created_at": "2026-08-20T07:03:03.269669+00:00",
+    "device_fingerprint": "28508800eaaf10ff"
+  },
+  "test@test.com": {
+    "name": "Test User",
+    "password": "$2b$12$IdhL07PuUHnynFNQodrqfeJiRl7z3hLn.q6ALXKoJXWSXHDrzL4Xu",
+    "created_at": "2026-08-20T07:36:08.556966+00:00",
+    "device_fingerprint": "92bfb074af617c83"
+  },
+  "inderdeep5402@gmail.com": {
+    "name": "Inder",
+    "password": "$2b$12$kaKfFlG8/ibfmmcHfj4kluCpKXEzSphIZI3WZMxlIHJxOd244q/M2",
+    "created_at": "2026-08-20T09:57:59.608965+00:00",
+    "device_fingerprint": "28508800eaaf10ff"
+  }
+}

@@ -1,14 +1,13 @@
-#!/usr/bin/env python3
 """
-NOD - AI Assistant Backend
-Flask + Ollama Integration
+NOD 2.0 - Secure AI Assistant Backend
+Flask + Ollama + Security Layer
 """
 
 import os
 import json
 import uuid
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 
 from flask import (
@@ -17,17 +16,40 @@ from flask import (
 )
 import requests
 
-app = Flask(__name__, template_folder='templates', static_folder='static')
-app.secret_key = os.environ.get("SECRET_KEY", "nod-secret-key-change-in-production")
+# Import NOD 2.0 Security Core
+from core.config import Config
+from core.security import (
+    hash_password, verify_password, generate_jwt, decode_jwt,
+    generate_sudo_token, verify_sudo_token, login_required, sudo_required,
+    generate_device_fingerprint
+)
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "qwen3:8b")
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+# Placeholder function
+def is_new_device(email: str) -> bool:
+    return False
+
+from core.acl import acl
+from core.scanner import scanner
+from core.vault import vault
+from core.audit import audit
+
+# Initialize config
+Config.ensure_dirs()
+
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = Config.SECRET_KEY
+app.config["PERMANENT_SESSION_LIFETIME"] = Config.SESSION_TIMEOUT
+
+OLLAMA_URL = Config.OLLAMA_URL
+DEFAULT_MODEL = Config.DEFAULT_MODEL
+DATA_DIR = Config.DATA_DIR
 
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 CHATS_DIR = os.path.join(DATA_DIR, "chats")
 os.makedirs(CHATS_DIR, exist_ok=True)
+
+# Login attempt tracking
+login_attempts = {}
 
 
 def load_users():
@@ -40,10 +62,6 @@ def load_users():
 def save_users(users):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(users, f, indent=2)
-
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
 
 
 def get_user_chats_file(email):
@@ -65,14 +83,9 @@ def save_user_chats(email, chats):
         json.dump(chats, f, indent=2, ensure_ascii=False)
 
 
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if "user" not in session:
-            return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
-    return decorated
-
+# =========================================================
+# AUTH ROUTES (SECURED WITH BCRYPT + JWT)
+# =========================================================
 
 @app.route("/")
 def root():
@@ -101,14 +114,49 @@ def api_login():
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
     remember = data.get("remember", False)
+    ip = request.remote_addr
+
+    # Rate limiting
+    if email in login_attempts:
+        attempts = login_attempts[email]
+        if attempts["count"] >= Config.MAX_LOGIN_ATTEMPTS:
+            if (datetime.now(timezone.utc) - attempts["last"]).seconds < Config.LOCKOUT_DURATION:
+                audit.log_auth("login_locked", email, False, ip)
+                return jsonify({"error": "Account locked. Try again in 5 minutes."}), 429
+            else:
+                login_attempts[email] = {"count": 0, "last": datetime.now(timezone.utc)}
+
     users = load_users()
     if email not in users:
-        return jsonify({"error": "User not found"}), 404
-    if users[email]["password"] != hash_password(password):
-        return jsonify({"error": "Invalid password"}), 401
+        _track_failed_login(email)
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if not verify_password(password, users[email]["password"]):
+        _track_failed_login(email)
+        audit.log_auth("login_failed", email, False, ip)
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    # Success
+    login_attempts[email] = {"count": 0, "last": datetime.now(timezone.utc)}
     session["user"] = email
     session.permanent = remember
-    return jsonify({"success": True, "email": email})
+
+    token = generate_jwt(email, users[email].get("name", "User"))
+    audit.log_auth("login_success", email, True, ip)
+
+    return jsonify({
+        "success": True,
+        "email": email,
+        "token": token,
+        "name": users[email].get("name", "User")
+    })
+
+
+def _track_failed_login(email):
+    if email not in login_attempts:
+        login_attempts[email] = {"count": 0, "last": datetime.now(timezone.utc)}
+    login_attempts[email]["count"] += 1
+    login_attempts[email]["last"] = datetime.now(timezone.utc)
 
 
 @app.route("/api/auth/signup", methods=["POST"])
@@ -117,23 +165,51 @@ def api_signup():
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
     name = data.get("name", "").strip()
+    ip = request.remote_addr
+
     if not email or not password or len(password) < 6:
         return jsonify({"error": "Invalid data. Password must be 6+ chars."}), 400
+
     users = load_users()
     if email in users:
         return jsonify({"error": "Email already registered"}), 409
+
+    # Hash password with bcrypt
     users[email] = {
         "name": name or email.split("@")[0],
         "password": hash_password(password),
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "device_fingerprint": generate_device_fingerprint()
     }
     save_users(users)
+        
+    # 🎉 SEND WELCOME EMAIL
+    try:
+        from core.emailer import send_welcome_email
+        email_result = send_welcome_email(email, users[email]["name"])
+        if email_result["success"]:
+            print(f"📧 Welcome email sent to {email} via {email_result['method']}")
+        else:
+            print(f"⚠️ Welcome email failed: {email_result['error']}")
+    except Exception as e:
+        print(f"⚠️ Email error: {e}")
+    
     session["user"] = email
-    return jsonify({"success": True, "email": email})
+    token = generate_jwt(email, users[email]["name"])
+    audit.log_auth("signup", email, True, ip)
+
+    return jsonify({
+        "success": True,
+        "email": email,
+        "token": token,
+        "name": users[email]["name"]
+    })
 
 
 @app.route("/api/auth/logout", methods=["POST"])
 def api_logout():
+    email = session.get("user", "anonymous")
+    audit.log_auth("logout", email, True, request.remote_addr)
     session.pop("user", None)
     return jsonify({"success": True})
 
@@ -142,12 +218,35 @@ def api_logout():
 @login_required
 def api_me():
     users = load_users()
-    email = session["user"]
+    email = session.get("user") or request.current_user.get("email")
     return jsonify({
         "email": email,
         "name": users.get(email, {}).get("name", "User")
     })
 
+
+@app.route("/api/auth/sudo", methods=["POST"])
+@login_required
+def api_sudo():
+    """Verify PIN and return sudo token for risky operations"""
+    data = request.get_json() or {}
+    pin = data.get("pin", "")
+    email = session.get("user")
+
+    # In production, verify PIN against stored hash
+    if pin != "3014":
+        audit.log("sudo_denied", {"reason": "invalid_pin"}, email, "alert")
+        return jsonify({"error": "Invalid PIN"}), 403
+
+    token = generate_sudo_token(email)
+    audit.log("sudo_granted", {"expires_in": "10min"}, email, "warning")
+
+    return jsonify({"success": True, "sudo_token": token})
+
+
+# =========================================================
+# CHAT ROUTES (PROTECTED)
+# =========================================================
 
 @app.route("/chat")
 def chat():
@@ -172,11 +271,12 @@ def create_chat():
     chats[chat_id] = {
         "id": chat_id,
         "title": title,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
         "messages": []
     }
     save_user_chats(session["user"], chats)
+    audit.log("chat_created", {"chat_id": chat_id}, session["user"])
     return jsonify(chats[chat_id])
 
 
@@ -200,7 +300,7 @@ def update_chat(chat_id):
         chats[chat_id]["title"] = data["title"]
     if "messages" in data:
         chats[chat_id]["messages"] = data["messages"]
-    chats[chat_id]["updated_at"] = datetime.now().isoformat()
+    chats[chat_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
     save_user_chats(session["user"], chats)
     return jsonify(chats[chat_id])
 
@@ -212,6 +312,7 @@ def delete_chat(chat_id):
     if chat_id in chats:
         del chats[chat_id]
         save_user_chats(session["user"], chats)
+        audit.log("chat_deleted", {"chat_id": chat_id}, session["user"], "warning")
     return jsonify({"success": True})
 
 
@@ -226,7 +327,7 @@ def rename_chat(chat_id):
     if chat_id not in chats:
         return jsonify({"error": "Chat not found"}), 404
     chats[chat_id]["title"] = new_title
-    chats[chat_id]["updated_at"] = datetime.now().isoformat()
+    chats[chat_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
     save_user_chats(session["user"], chats)
     return jsonify(chats[chat_id])
 
@@ -239,8 +340,9 @@ def clear_chat(chat_id):
         return jsonify({"error": "Chat not found"}), 404
     chats[chat_id]["messages"] = []
     chats[chat_id]["title"] = "New Chat"
-    chats[chat_id]["updated_at"] = datetime.now().isoformat()
+    chats[chat_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
     save_user_chats(session["user"], chats)
+    audit.log("chat_cleared", {"chat_id": chat_id}, session["user"])
     return jsonify(chats[chat_id])
 
 
@@ -250,8 +352,10 @@ def send_message(chat_id):
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     model = data.get("model", DEFAULT_MODEL)
+
     if not user_message:
         return jsonify({"error": "Message is empty"}), 400
+
     chats = load_user_chats(session["user"])
     if chat_id not in chats:
         return jsonify({"error": "Chat not found"}), 404
@@ -259,12 +363,14 @@ def send_message(chat_id):
     msg_obj = {
         "role": "user",
         "content": user_message,
-        "time": datetime.now().isoformat()
+        "time": datetime.now(timezone.utc).isoformat()
     }
     chats[chat_id]["messages"].append(msg_obj)
+
     if chats[chat_id]["title"] == "New Chat" and len(chats[chat_id]["messages"]) == 1:
         chats[chat_id]["title"] = user_message[:40] + ("..." if len(user_message) > 40 else "")
-    chats[chat_id]["updated_at"] = datetime.now().isoformat()
+
+    chats[chat_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
     save_user_chats(session["user"], chats)
 
     conversation = []
@@ -294,15 +400,17 @@ def send_message(chat_id):
                                 break
                         except json.JSONDecodeError:
                             continue
+
             assistant_msg = {
                 "role": "assistant",
                 "content": assistant_content,
-                "time": datetime.now().isoformat()
+                "time": datetime.now(timezone.utc).isoformat()
             }
             chats[chat_id]["messages"].append(assistant_msg)
-            chats[chat_id]["updated_at"] = datetime.now().isoformat()
+            chats[chat_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
             save_user_chats(session["user"], chats)
             yield f"data: {json.dumps({'done': True, 'full': assistant_content})}\n\n"
+
         except Exception as e:
             error_msg = f"Error: {str(e)}. Make sure Ollama is running."
             yield f"data: {json.dumps({'error': error_msg})}\n\n"
@@ -312,6 +420,83 @@ def send_message(chat_id):
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
+
+
+# =========================================================
+# SECURITY API ROUTES
+# =========================================================
+
+@app.route("/api/security/scan", methods=["POST"])
+@login_required
+def scan_file():
+    data = request.get_json() or {}
+    file_path = data.get("path", "")
+
+    if not acl.is_path_safe(file_path):
+        audit.log_file_access(file_path, "scan_denied", session["user"], False, "ACL denied")
+        return jsonify({"error": "Access denied by security policy"}), 403
+
+    result = scanner.scan_file(file_path)
+    audit.log("file_scanned", {"path": file_path, "sensitive": result["is_sensitive"]}, session["user"])
+    return jsonify(result)
+
+
+@app.route("/api/security/acl/allow", methods=["POST"])
+@login_required
+@sudo_required
+def allow_path():
+    data = request.get_json() or {}
+    path = data.get("path", "")
+    readonly = data.get("readonly", False)
+
+    acl.allow_path(path, readonly)
+    audit.log("acl_allow", {"path": path, "readonly": readonly}, session["user"], "warning")
+    return jsonify({"success": True, "message": f"Access granted to {path}"})
+
+
+@app.route("/api/security/audit", methods=["GET"])
+@login_required
+def get_audit_logs():
+    logs = audit.get_logs(user=session["user"], limit=100)
+    return jsonify({"logs": logs})
+
+
+@app.route("/api/security/alerts", methods=["GET"])
+@login_required
+def get_security_alerts():
+    alerts = audit.get_security_alerts(limit=50)
+    return jsonify({"alerts": alerts})
+
+
+@app.route("/api/vault/store", methods=["POST"])
+@login_required
+def vault_store():
+    data = request.get_json() or {}
+    file_path = data.get("path", "")
+    pin = data.get("pin", "")
+
+    result = vault.store_file(file_path, pin, {"owner": session["user"]})
+    if result["success"]:
+        audit.log_vault("store", result["vault_id"], session["user"], True)
+    return jsonify(result)
+
+
+@app.route("/api/vault/list", methods=["GET"])
+@login_required
+def vault_list():
+    return jsonify({"files": vault.list_vault()})
+
+
+@app.route("/api/vault/retrieve", methods=["POST"])
+@login_required
+def vault_retrieve():
+    data = request.get_json() or {}
+    vault_id = data.get("vault_id", "")
+    pin = data.get("pin", "")
+
+    result = vault.retrieve_file(vault_id, pin)
+    audit.log_vault("access", vault_id, session["user"], result["success"])
+    return jsonify(result)
 
 
 @app.route("/api/models")
@@ -334,12 +519,19 @@ def health():
         ollama_status = "connected" if r.status_code == 200 else "error"
     except:
         ollama_status = "disconnected"
-    return jsonify({"status": "ok", "ollama": ollama_status, "model": DEFAULT_MODEL})
+    return jsonify({
+        "status": "ok",
+        "ollama": ollama_status,
+        "model": DEFAULT_MODEL,
+        "version": "2.0.0-secure",
+        "security": "enabled"
+    })
 
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("  NOD AI Assistant")
+    print("=" * 60)
+    print("  NOD 2.0 - Secure AI Assistant")
     print("  URL: http://127.0.0.1:5000")
-    print("=" * 50)
+    print("  Security: ENABLED (bcrypt + JWT + ACL + Vault + Audit)")
+    print("=" * 60)
     app.run(debug=True, host="0.0.0.0", port=5000, threaded=True)
